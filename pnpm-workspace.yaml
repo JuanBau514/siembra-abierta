@@ -1,0 +1,7 @@
+# Scripts de instalación: solo se permiten los que aprobamos explícitamente.
+allowBuilds:
+  '@apollo/protobufjs': false
+  '@prisma/engines': true
+  prisma: true
+  '@prisma/client': true
+  esbuild: true

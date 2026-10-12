@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+generated/
+# Solo pnpm: ignorar lockfiles de otros gestores
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
+
+/src/generated/prisma
+*.tsbuildinfo
