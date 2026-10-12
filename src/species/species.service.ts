@@ -1,10 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { normalizeText } from '../importers/gbif/normalize.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const MAX_LIMIT = 50;
 const clamp = (limit: number) => Math.min(Math.max(limit, 1), MAX_LIMIT);
 
-const withRelations = { commonNames: true, invasionStatuses: true } as const;
+const withRelations = {
+  commonNames: true,
+  distributions: true,
+  invasionStatuses: true,
+} as const;
 
 @Injectable()
 export class SpeciesService {
@@ -21,10 +26,10 @@ export class SpeciesService {
     return this.prisma.species.findMany({
       where: {
         OR: [
-          { scientificName: { contains: query, mode: 'insensitive' } },
+          { nameNormalized: { contains: normalizeText(query) } },
           {
             commonNames: {
-              some: { name: { contains: query, mode: 'insensitive' } },
+              some: { nameNormalized: { contains: normalizeText(query) } },
             },
           },
         ],

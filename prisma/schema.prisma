@@ -41,78 +41,112 @@ enum LightLevel {
 /// Fuente de un dato (GBIF, un jardín botánico, una persona aportante...).
 /// Solo se admiten licencias que permitan uso comercial y redistribución.
 model Source {
-  id          String   @id @default(cuid())
-  name        String
-  url         String?
-  license     String // p. ej. CC0-1.0, CC-BY-4.0
-  citation    String?
-  importedAt  DateTime @default(now())
+  id         String   @id @default(cuid())
+  name       String
+  url        String?
+  license    String // normalizada: CC0-1.0 o CC-BY-4.0
+  licenseUrl String?
+  citation   String?
+  /// Identificador en el sistema de origen (p. ej. el UUID del dataset en GBIF).
+  externalId String?  @unique
+  importedAt DateTime @default(now())
 
   invasionStatuses InvasionStatus[]
   commonNames      CommonName[]
   species          Species[]
+  distributions    SpeciesCountry[]
 
   @@map("sources")
 }
 
 model Species {
   id             String  @id @default(cuid())
-  scientificName String  @unique
+  /// Nombre científico con autoría: "Dimerandra emarginata (G.Mey.) Hoehne".
+  scientificName String
+  /// Nombre canónico sin autoría; es la clave natural: "Dimerandra emarginata".
+  canonicalName  String  @unique
+  /// Canónico en minúsculas y sin acentos, para búsquedas.
+  nameNormalized String
   genus          String?
   family         String?
   gbifKey        Int?    @unique
-  /// Rango de altitud donde se registra (metros sobre el nivel del mar).
-  minElevationM  Int?
-  maxElevationM  Int?
   /// Especie amenazada: sus coordenadas nunca se publican exactas.
   isThreatened   Boolean @default(false)
 
   sourceId  String?
-  source    Source? @relation(fields: [sourceId], references: [id])
+  source    Source?  @relation(fields: [sourceId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   commonNames      CommonName[]
+  distributions    SpeciesCountry[]
   invasionStatuses InvasionStatus[]
   careObservations CareObservation[]
 
   @@index([genus])
   @@index([family])
+  @@index([nameNormalized])
   @@map("species")
+}
+
+/// Presencia de una especie en un país. La altitud depende del país
+/// (y del dato), por eso no vive en `Species`.
+model SpeciesCountry {
+  speciesId           String
+  countryIso          String // ISO 3166-1 alfa-2: CO, EC, PA, VE
+  /// Registros abiertos (CC0/CC-BY) en GBIF para este país.
+  occurrenceCount     Int
+  /// Rango central observado (percentiles 5 y 95), robusto a errores de captura.
+  minElevationM       Int?
+  maxElevationM       Int?
+  elevationSampleSize Int?
+
+  species   Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  sourceId  String
+  source    Source   @relation(fields: [sourceId], references: [id])
+  updatedAt DateTime @updatedAt
+
+  @@id([speciesId, countryIso])
+  @@index([countryIso])
+  @@map("species_countries")
 }
 
 /// Un mismo nombre común puede designar especies distintas según el país,
 /// por eso se guarda con país y región.
 model CommonName {
-  id         String  @id @default(cuid())
-  name       String
-  language   String  @default("es")
-  countryIso String? // ISO 3166-1 alfa-2: CO, EC, PA, VE
-  region     String?
+  id             String  @id @default(cuid())
+  /// Tal como se muestra al usuario.
+  name           String
+  /// Minúsculas, sin acentos, espacios colapsados.
+  nameNormalized String
+  language       String  @default("es") // ISO 639-1
+  /// Solo si la fuente lo indica; si no, null (no se asume país).
+  countryIso     String?
+  region         String?
 
   speciesId String
   species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
-  sourceId  String?
-  source    Source? @relation(fields: [sourceId], references: [id])
+  sourceId  String
+  source    Source  @relation(fields: [sourceId], references: [id])
 
-  @@unique([speciesId, name, language, countryIso, region])
-  @@index([name])
+  @@unique([speciesId, nameNormalized, language, sourceId])
+  @@index([nameNormalized])
   @@map("common_names")
 }
 
 /// La invasión depende del lugar: una especie puede ser invasora en un
 /// piso térmico y no en otro.
 model InvasionStatus {
-  id         String       @id @default(cuid())
-  status     OriginStatus
-  riskLevel  RiskLevel?
-  countryIso String
-  region     String?
+  id            String             @id @default(cuid())
+  status        OriginStatus
+  riskLevel     RiskLevel?
+  countryIso    String
+  region        String?
   minElevationM Int?
   maxElevationM Int?
-  impact     String?
-  management String?
-  verification VerificationStatus @default(REPORTED)
+  impact        String?
+  management    String?
+  verification  VerificationStatus @default(REPORTED)
 
   speciesId String
   species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
@@ -126,23 +160,23 @@ model InvasionStatus {
 /// Experiencia real de cuidado, ligada al contexto donde ocurrió.
 /// Las recomendaciones se derivan de muchas observaciones, no de una sola.
 model CareObservation {
-  id           String   @id @default(cuid())
-  countryIso   String
-  region       String?
-  elevationM   Int?
+  id                String             @id @default(cuid())
+  countryIso        String
+  region            String?
+  elevationM        Int?
   /// Ubicación generalizada (nunca coordenadas exactas).
-  zoneCode     String?
-  isIndoor     Boolean?
-  light        LightLevel?
-  avgTempC     Float?
-  avgHumidity  Float?
+  zoneCode          String?
+  isIndoor          Boolean?
+  light             LightLevel?
+  avgTempC          Float?
+  avgHumidity       Float?
   wateringEveryDays Int?
-  substrate    String?
+  substrate         String?
   /// true si la planta prosperó con esta práctica.
-  thrived      Boolean?
-  notes        String?
-  verification VerificationStatus @default(REPORTED)
-  observedAt   DateTime @default(now())
+  thrived           Boolean?
+  notes             String?
+  verification      VerificationStatus @default(REPORTED)
+  observedAt        DateTime           @default(now())
 
   speciesId String
   species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)

@@ -19,14 +19,32 @@ export class CommonName {
 }
 
 @ObjectType()
+export class SpeciesCountry {
+  @Field() countryIso: string;
+  @Field(() => Int) occurrenceCount: number;
+  @Field(() => Int, {
+    nullable: true,
+    description: 'Percentil 5 de la altitud observada (m s. n. m.).',
+  })
+  minElevationM?: number | null;
+  @Field(() => Int, {
+    nullable: true,
+    description: 'Percentil 95 de la altitud observada (m s. n. m.).',
+  })
+  maxElevationM?: number | null;
+  @Field(() => Int, { nullable: true }) elevationSampleSize?: number | null;
+}
+
+@ObjectType()
 export class Species {
   @Field(() => ID) id: string;
   @Field() scientificName: string;
+  @Field() canonicalName: string;
   @Field(() => String, { nullable: true }) genus?: string | null;
   @Field(() => String, { nullable: true }) family?: string | null;
-  @Field(() => Int, { nullable: true }) minElevationM?: number | null;
-  @Field(() => Int, { nullable: true }) maxElevationM?: number | null;
   @Field(() => [CommonName], { complexity: 5 }) commonNames: CommonName[];
+  @Field(() => [SpeciesCountry], { complexity: 3 })
+  distributions: SpeciesCountry[];
   @Field(() => [InvasionStatus], { complexity: 5 })
   invasionStatuses: InvasionStatus[];
 }
