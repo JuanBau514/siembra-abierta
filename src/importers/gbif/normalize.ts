@@ -89,3 +89,34 @@ export function elevationRange(
     sampleSize: valid.length,
   };
 }
+
+export interface ScientificNameParts {
+  genus: string;
+  epithet: string;
+  authorship: string | null;
+}
+
+/**
+ * Descompone un nombre científico en género, epíteto y autoría.
+ * "Bursera simaruba" + "Bursera simaruba (L.) Sarg." → { Bursera, simaruba, "(L.) Sarg." }
+ * Devuelve null si el nombre no tiene al menos género y epíteto.
+ */
+export function splitScientificName(
+  canonicalName: string,
+  scientificName: string,
+  genusHint?: string | null,
+): ScientificNameParts | null {
+  const canonical = canonicalName.replace(/\s+/g, ' ').trim();
+  const genus =
+    genusHint && canonical.startsWith(`${genusHint} `)
+      ? genusHint
+      : canonical.split(' ')[0];
+  const epithet = canonical.slice(genus.length).trim();
+  if (!genus || !epithet) return null;
+
+  const full = scientificName.replace(/\s+/g, ' ').trim();
+  const authorship = full.startsWith(`${canonical} `)
+    ? full.slice(canonical.length).trim()
+    : null;
+  return { genus, epithet, authorship: authorship || null };
+}

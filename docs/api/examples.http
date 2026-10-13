@@ -1,0 +1,20 @@
+### Estado del servicio
+GET http://localhost:3000/health
+
+### Buscar especies (ignora acentos y mayúsculas)
+POST http://localhost:3000/graphql
+Content-Type: application/json
+
+{
+  "query": "query ($q: String!, $n: Int) { searchSpecies(query: $q, limit: $n) { canonicalName family commonNames { name countryIso } distributions { countryIso occurrenceCount minElevationM maxElevationM } } }",
+  "variables": { "q": "almacigo", "n": 3 }
+}
+
+### Especies invasoras de un país
+POST http://localhost:3000/graphql
+Content-Type: application/json
+
+{
+  "query": "query ($c: String!) { invasiveSpecies(countryIso: $c, limit: 10) { status riskLevel impact management species { canonicalName } } }",
+  "variables": { "c": "CO" }
+}

@@ -1,5 +1,16 @@
-// Esquema inicial de Siembra Abierta.
-// Principio: cada dato guarda su fuente, su licencia y su nivel de verificación.
+// Esquema de Siembra Abierta.
+//
+// - La base de datos está en ESPAÑOL (tablas, columnas y enumeraciones, en snake_case y
+//   sin acentos). El código usa nombres en inglés y los conecta con @@map / @map.
+// - Está en tercera forma normal (3FN), con las excepciones documentadas abajo.
+// - Principio: cada dato guarda su fuente, su licencia y su nivel de verificación.
+//
+// Los comentarios con tres barras (///) alimentan la documentación automática
+// (docs/database/SCHEMA.md). Ejecuta `pnpm docs:generate` después de cambiar este archivo.
+//
+// Excepciones deliberadas a la 3FN: las columnas `nombre_normalizado` (especies y
+// nombres_comunes) son datos derivados que el importador mantiene para poder buscar sin
+// acentos ni mayúsculas. docs/database/verificacion.sql comprueba que sean coherentes.
 
 generator client {
   provider            = "prisma-client"
@@ -14,173 +25,388 @@ datasource db {
 
 /// Nivel de verificación de un dato.
 enum VerificationStatus {
-  REPORTED // reportado por una persona
-  CORROBORATED // varios reportes coinciden
-  EXPERT_VERIFIED // verificado por un experto o institución
+  /// Reportado por una persona; aún sin corroborar.
+  REPORTED        @map("REPORTADO")
+  /// Varios reportes independientes coinciden.
+  CORROBORATED    @map("CORROBORADO")
+  /// Verificado por un experto o una institución.
+  EXPERT_VERIFIED @map("VERIFICADO_EXPERTO")
+
+  @@map("estado_verificacion")
 }
 
-/// Estatus de una especie en una región.
+/// Estatus de una especie en un lugar.
 enum OriginStatus {
-  NATIVE
-  INTRODUCED
-  INVASIVE
+  /// Nativa de la región.
+  NATIVE     @map("NATIVA")
+  /// Introducida por el ser humano, sin daño documentado.
+  INTRODUCED @map("INTRODUCIDA")
+  /// Introducida y con daño documentado a ecosistemas locales.
+  INVASIVE   @map("INVASORA")
+
+  @@map("estado_origen")
 }
 
+/// Nivel de riesgo ecológico de una especie invasora.
 enum RiskLevel {
-  LOW
-  MEDIUM
-  HIGH
+  LOW    @map("BAJO")
+  MEDIUM @map("MEDIO")
+  HIGH   @map("ALTO")
+
+  @@map("nivel_riesgo")
 }
 
+/// Nivel de luz donde se cultivó la planta.
 enum LightLevel {
-  FULL_SUN
-  PARTIAL_SHADE
-  SHADE
+  /// Sol directo la mayor parte del día.
+  FULL_SUN      @map("SOL_PLENO")
+  /// Sol parte del día y sombra el resto.
+  PARTIAL_SHADE @map("MEDIA_SOMBRA")
+  /// Poca luz directa.
+  SHADE         @map("SOMBRA")
+
+  @@map("nivel_luz")
+}
+
+/// Idiomas admitidos en los nombres comunes. Tabla de referencia.
+model Language {
+  /// Código ISO 639-1: es, en, pt.
+  code String @id @map("codigo")
+  /// Nombre del idioma en español.
+  name String @map("nombre")
+
+  commonNames CommonName[]
+
+  @@map("idiomas")
+}
+
+/// Países. Tabla de referencia.
+model Country {
+  /// Código ISO 3166-1 alfa-2 en mayúsculas: CO, EC, PA, VE.
+  isoCode String @id @map("codigo_iso")
+  /// Nombre del país en español.
+  name    String @map("nombre")
+
+  distributions    SpeciesCountry[]
+  commonNames      CommonName[]
+  invasionStatuses InvasionStatus[]
+  careObservations CareObservation[]
+  images           Image[]
+
+  @@map("paises")
+}
+
+/// Licencias abiertas admitidas. Tabla de referencia.
+/// Solo se permiten licencias que consienten uso comercial y redistribución.
+model License {
+  /// Código normalizado: `CC0-1.0` o `CC-BY-4.0`.
+  code String @id @map("codigo")
+  /// Nombre completo de la licencia.
+  name String @map("nombre")
+  /// Página con el texto de la licencia.
+  url  String @map("url")
+
+  sources Source[]
+  images  Image[]
+
+  @@map("licencias")
 }
 
 /// Fuente de un dato (GBIF, un jardín botánico, una persona aportante...).
-/// Solo se admiten licencias que permitan uso comercial y redistribución.
 model Source {
-  id         String   @id @default(cuid())
-  name       String
-  url        String?
-  license    String // normalizada: CC0-1.0 o CC-BY-4.0
-  licenseUrl String?
-  citation   String?
+  /// Identificador interno (cuid).
+  id          String   @id @default(cuid())
+  /// Nombre de la fuente o del dataset.
+  name        String   @map("nombre")
+  /// Página de la fuente.
+  url         String?  @map("url")
+  /// Licencia bajo la que se publica la fuente.
+  licenseCode String   @map("licencia_codigo")
+  /// Texto de citación sugerido por la fuente.
+  citation    String?  @map("cita")
   /// Identificador en el sistema de origen (p. ej. el UUID del dataset en GBIF).
-  externalId String?  @unique
-  importedAt DateTime @default(now())
+  externalId  String?  @unique @map("id_externo")
+  /// Cuándo se registró esta fuente.
+  importedAt  DateTime @default(now()) @map("registrada_en")
 
+  license          License          @relation(fields: [licenseCode], references: [code])
   invasionStatuses InvasionStatus[]
   commonNames      CommonName[]
   species          Species[]
   distributions    SpeciesCountry[]
+  categories       SpeciesCategory[]
+  images           Image[]
 
-  @@map("sources")
+  @@map("fuentes")
 }
 
+/// Familia botánica.
+model Family {
+  /// Identificador interno (cuid).
+  id   String @id @default(cuid())
+  /// Nombre de la familia: "Orchidaceae".
+  name String @unique @map("nombre")
+
+  genera Genus[]
+
+  @@map("familias")
+}
+
+/// Género botánico. Cada género pertenece a una familia.
+model Genus {
+  /// Identificador interno (cuid).
+  id       String  @id @default(cuid())
+  /// Nombre del género: "Bursera".
+  name     String  @unique @map("nombre")
+  /// Familia a la que pertenece.
+  familyId String? @map("familia_id")
+
+  family  Family?   @relation(fields: [familyId], references: [id])
+  species Species[]
+
+  @@index([familyId])
+  @@map("generos")
+}
+
+/// Especie de planta. Una fila por especie aceptada, sin sinónimos.
+/// El nombre científico se arma con el género y el epíteto: "Bursera" + "simaruba".
 model Species {
-  id             String  @id @default(cuid())
-  /// Nombre científico con autoría: "Dimerandra emarginata (G.Mey.) Hoehne".
-  scientificName String
-  /// Nombre canónico sin autoría; es la clave natural: "Dimerandra emarginata".
-  canonicalName  String  @unique
-  /// Canónico en minúsculas y sin acentos, para búsquedas.
-  nameNormalized String
-  genus          String?
-  family         String?
-  gbifKey        Int?    @unique
+  /// Identificador interno (cuid).
+  id             String   @id @default(cuid())
+  /// Género de la especie (de aquí sale también la familia).
+  genusId        String   @map("genero_id")
+  /// Epíteto específico: "simaruba" en "Bursera simaruba".
+  epithet        String   @map("epiteto")
+  /// Autoría del nombre: "(G.Mey.) Hoehne".
+  authorship     String?  @map("autoria")
+  /// Nombre científico en minúsculas y sin acentos, para búsquedas (dato derivado).
+  nameNormalized String   @map("nombre_normalizado")
+  /// Identificador de la especie en GBIF.
+  gbifKey        Int?     @unique @map("clave_gbif")
   /// Especie amenazada: sus coordenadas nunca se publican exactas.
-  isThreatened   Boolean @default(false)
+  isThreatened   Boolean  @default(false) @map("amenazada")
+  /// Fuente de la taxonomía.
+  sourceId       String?  @map("fuente_id")
+  createdAt      DateTime @default(now()) @map("creada_en")
+  updatedAt      DateTime @updatedAt @map("actualizada_en")
 
-  sourceId  String?
-  source    Source?  @relation(fields: [sourceId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
+  genus            Genus             @relation(fields: [genusId], references: [id])
+  source           Source?           @relation(fields: [sourceId], references: [id])
   commonNames      CommonName[]
   distributions    SpeciesCountry[]
   invasionStatuses InvasionStatus[]
   careObservations CareObservation[]
+  categories       SpeciesCategory[]
+  images           Image[]
 
-  @@index([genus])
-  @@index([family])
+  @@unique([genusId, epithet])
   @@index([nameNormalized])
-  @@map("species")
+  @@map("especies")
 }
 
 /// Presencia de una especie en un país. La altitud depende del país
-/// (y del dato), por eso no vive en `Species`.
+/// (y del dato), por eso no vive en `especies`.
 model SpeciesCountry {
-  speciesId           String
-  countryIso          String // ISO 3166-1 alfa-2: CO, EC, PA, VE
+  /// Especie.
+  speciesId           String   @map("especie_id")
+  /// País.
+  countryCode         String   @map("pais_codigo")
   /// Registros abiertos (CC0/CC-BY) en GBIF para este país.
-  occurrenceCount     Int
-  /// Rango central observado (percentiles 5 y 95), robusto a errores de captura.
-  minElevationM       Int?
-  maxElevationM       Int?
-  elevationSampleSize Int?
+  occurrenceCount     Int      @map("num_registros")
+  /// Altitud mínima del rango central observado (percentil 5), en m s. n. m.
+  minElevationM       Int?     @map("altitud_min_m")
+  /// Altitud máxima del rango central observado (percentil 95), en m s. n. m.
+  maxElevationM       Int?     @map("altitud_max_m")
+  /// Cuántos registros con altitud se usaron para calcular el rango.
+  elevationSampleSize Int?     @map("tamano_muestra_altitud")
+  /// Fuente de los datos de presencia.
+  sourceId            String   @map("fuente_id")
+  updatedAt           DateTime @updatedAt @map("actualizada_en")
 
-  species   Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
-  sourceId  String
-  source    Source   @relation(fields: [sourceId], references: [id])
-  updatedAt DateTime @updatedAt
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  country Country @relation(fields: [countryCode], references: [isoCode])
+  source  Source  @relation(fields: [sourceId], references: [id])
 
-  @@id([speciesId, countryIso])
-  @@index([countryIso])
-  @@map("species_countries")
+  @@id([speciesId, countryCode])
+  @@index([countryCode])
+  @@map("especies_paises")
 }
 
 /// Un mismo nombre común puede designar especies distintas según el país,
 /// por eso se guarda con país y región.
 model CommonName {
+  /// Identificador interno (cuid).
   id             String  @id @default(cuid())
   /// Tal como se muestra al usuario.
-  name           String
-  /// Minúsculas, sin acentos, espacios colapsados.
-  nameNormalized String
-  language       String  @default("es") // ISO 639-1
-  /// Solo si la fuente lo indica; si no, null (no se asume país).
-  countryIso     String?
-  region         String?
+  name           String  @map("nombre")
+  /// Minúsculas, sin acentos, espacios colapsados (dato derivado para búsquedas).
+  nameNormalized String  @map("nombre_normalizado")
+  /// Idioma del nombre.
+  languageCode   String  @default("es") @map("idioma_codigo")
+  /// País, solo si la fuente lo indica; si no, null (no se asume país).
+  countryCode    String? @map("pais_codigo")
+  /// Región o departamento, si se conoce.
+  region         String? @map("region")
+  /// Especie a la que designa el nombre.
+  speciesId      String  @map("especie_id")
+  /// Fuente (con su licencia) de donde viene el nombre.
+  sourceId       String  @map("fuente_id")
 
-  speciesId String
-  species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
-  sourceId  String
-  source    Source  @relation(fields: [sourceId], references: [id])
+  species  Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageCode], references: [code])
+  country  Country? @relation(fields: [countryCode], references: [isoCode])
+  source   Source   @relation(fields: [sourceId], references: [id])
 
-  @@unique([speciesId, nameNormalized, language, sourceId])
+  @@unique([speciesId, nameNormalized, languageCode, sourceId])
   @@index([nameNormalized])
-  @@map("common_names")
+  @@map("nombres_comunes")
 }
 
 /// La invasión depende del lugar: una especie puede ser invasora en un
 /// piso térmico y no en otro.
 model InvasionStatus {
+  /// Identificador interno (cuid).
   id            String             @id @default(cuid())
-  status        OriginStatus
-  riskLevel     RiskLevel?
-  countryIso    String
-  region        String?
-  minElevationM Int?
-  maxElevationM Int?
-  impact        String?
-  management    String?
-  verification  VerificationStatus @default(REPORTED)
+  /// Nativa, introducida o invasora en este lugar.
+  status        OriginStatus       @map("estado")
+  /// Riesgo ecológico, si se conoce.
+  riskLevel     RiskLevel?         @map("nivel_riesgo")
+  /// País.
+  countryCode   String             @map("pais_codigo")
+  /// Región o departamento, si aplica.
+  region        String?            @map("region")
+  /// Altitud mínima donde aplica el estatus (m s. n. m.).
+  minElevationM Int?               @map("altitud_min_m")
+  /// Altitud máxima donde aplica el estatus (m s. n. m.).
+  maxElevationM Int?               @map("altitud_max_m")
+  /// Daño que causa al ecosistema.
+  impact        String?            @map("impacto")
+  /// Recomendación de manejo o control.
+  management    String?            @map("manejo")
+  /// Nivel de verificación del dato.
+  verification  VerificationStatus @default(REPORTED) @map("verificacion")
+  /// Especie a la que se refiere.
+  speciesId     String             @map("especie_id")
+  /// Fuente del dato (debe ser una lista verificable).
+  sourceId      String             @map("fuente_id")
 
-  speciesId String
-  species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
-  sourceId  String
-  source    Source  @relation(fields: [sourceId], references: [id])
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  country Country @relation(fields: [countryCode], references: [isoCode])
+  source  Source  @relation(fields: [sourceId], references: [id])
 
-  @@index([countryIso, status])
-  @@map("invasion_statuses")
+  @@index([countryCode, status])
+  @@map("estados_invasion")
 }
 
 /// Experiencia real de cuidado, ligada al contexto donde ocurrió.
 /// Las recomendaciones se derivan de muchas observaciones, no de una sola.
 model CareObservation {
+  /// Identificador interno (cuid).
   id                String             @id @default(cuid())
-  countryIso        String
-  region            String?
-  elevationM        Int?
+  /// País.
+  countryCode       String             @map("pais_codigo")
+  /// Región o departamento.
+  region            String?            @map("region")
+  /// Altitud del lugar de cultivo (m s. n. m.).
+  elevationM        Int?               @map("altitud_m")
   /// Ubicación generalizada (nunca coordenadas exactas).
-  zoneCode          String?
-  isIndoor          Boolean?
-  light             LightLevel?
-  avgTempC          Float?
-  avgHumidity       Float?
-  wateringEveryDays Int?
-  substrate         String?
+  zoneCode          String?            @map("zona")
+  /// true si la planta estaba en interior.
+  isIndoor          Boolean?           @map("es_interior")
+  /// Luz que recibía la planta.
+  light             LightLevel?        @map("luz")
+  /// Temperatura media del lugar (°C).
+  avgTempC          Float?             @map("temperatura_media_c")
+  /// Humedad relativa media del lugar (%).
+  avgHumidity       Float?             @map("humedad_media")
+  /// Cada cuántos días se regaba.
+  wateringEveryDays Int?               @map("riego_cada_dias")
+  /// Sustrato usado.
+  substrate         String?            @map("sustrato")
   /// true si la planta prosperó con esta práctica.
-  thrived           Boolean?
-  notes             String?
-  verification      VerificationStatus @default(REPORTED)
-  observedAt        DateTime           @default(now())
+  thrived           Boolean?           @map("prospero")
+  /// Notas libres de la persona que aporta.
+  notes             String?            @map("notas")
+  /// Nivel de verificación del dato.
+  verification      VerificationStatus @default(REPORTED) @map("verificacion")
+  /// Cuándo ocurrió la observación.
+  observedAt        DateTime           @default(now()) @map("observada_en")
+  /// Especie observada.
+  speciesId         String             @map("especie_id")
 
-  speciesId String
-  species   Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  species Species @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  country Country @relation(fields: [countryCode], references: [isoCode])
 
-  @@index([speciesId, countryIso])
-  @@map("care_observations")
+  @@index([speciesId, countryCode])
+  @@map("observaciones_cuidado")
+}
+
+/// Categoría de uso de una planta (fruta, hortaliza, flor...). Tabla de referencia.
+/// No incluye usos medicinales ni rituales (ver CONTENT_POLICY.md).
+model Category {
+  /// Código estable: FRUTA, HORTALIZA, CULTIVO, FLOR.
+  code        String @id @map("codigo")
+  /// Nombre en español.
+  name        String @map("nombre")
+  /// Qué incluye la categoría.
+  description String @map("descripcion")
+
+  species SpeciesCategory[]
+
+  @@map("categorias")
+}
+
+/// Categorías de una especie. Una misma especie puede estar en varias
+/// (el tomate es hortaliza y fruta; el maíz es cultivo y hortaliza).
+model SpeciesCategory {
+  /// Especie.
+  speciesId    String @map("especie_id")
+  /// Categoría.
+  categoryCode String @map("categoria_codigo")
+  /// Fuente de la clasificación.
+  sourceId     String @map("fuente_id")
+
+  species  Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryCode], references: [code])
+  source   Source   @relation(fields: [sourceId], references: [id])
+
+  @@id([speciesId, categoryCode])
+  @@index([categoryCode])
+  @@map("especies_categorias")
+}
+
+/// Fotografía de una especie. Cada imagen guarda su autoría y su licencia propias
+/// (solo CC0 o CC-BY): la licencia de la imagen puede diferir de la de su registro.
+/// Se guarda el enlace, no el archivo: la imagen se sirve desde su origen.
+model Image {
+  /// Identificador interno (cuid).
+  id           String   @id @default(cuid())
+  /// Especie fotografiada.
+  speciesId    String   @map("especie_id")
+  /// Enlace a la imagen (tamaño grande, para mostrar).
+  url          String   @map("url")
+  /// Enlace a una versión pequeña (listas y tarjetas), si el origen la ofrece.
+  thumbnailUrl String?  @map("url_miniatura")
+  /// Página del origen donde está la foto (para atribuir y verificar).
+  pageUrl      String?  @map("url_origen")
+  /// Persona autora o titular de los derechos. Obligatoria: CC-BY exige atribución.
+  author       String   @map("autor")
+  /// Licencia de esta imagen.
+  licenseCode  String   @map("licencia_codigo")
+  /// País donde se tomó la foto, si se conoce.
+  countryCode  String?  @map("pais_codigo")
+  /// Posición al mostrar: 0 es la imagen principal.
+  position     Int      @default(0) @map("orden")
+  /// Fuente de la que se obtuvo (GBIF).
+  sourceId     String   @map("fuente_id")
+  importedAt   DateTime @default(now()) @map("importada_en")
+
+  species Species  @relation(fields: [speciesId], references: [id], onDelete: Cascade)
+  license License  @relation(fields: [licenseCode], references: [code])
+  country Country? @relation(fields: [countryCode], references: [isoCode])
+  source  Source   @relation(fields: [sourceId], references: [id])
+
+  @@unique([speciesId, url])
+  @@index([speciesId, position])
+  @@map("imagenes")
 }

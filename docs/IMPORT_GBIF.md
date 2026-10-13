@@ -5,59 +5,72 @@ Carga especies de plantas, nombres comunes en español y rango de altitud desde 
 
 ```bash
 pnpm db:up && pnpm exec prisma migrate deploy
-pnpm import:gbif --country CO --limit 50            # importa
-pnpm import:gbif --country CO --limit 50 --dry-run  # simula, no escribe
+pnpm import:gbif --country CO --limit 50 --dry-run   # simula, no escribe
+pnpm import:gbif --country CO --limit 50             # importa las 50 más registradas
+pnpm import:gbif --country CO --limit 200000 --basis ALL --concurrency 6 --skip-existing   # todo el país
 ```
 
-Opciones: `--country` (ISO-2), `--limit` (1–1000), `--basis` (por defecto
-`HUMAN_OBSERVATION`), `--languages` (ISO 639-3, por defecto `spa`).
-Es idempotente: se puede ejecutar varias veces sin duplicar datos.
+| Opción | Qué hace |
+|---|---|
+| `--country` | País, código ISO 3166-1 alfa-2 (por defecto `CO`) |
+| `--limit` | Máximo de especies (1 a 200000) |
+| `--basis` | Tipo de registro de GBIF: `HUMAN_OBSERVATION` (por defecto) o `ALL` |
+| `--languages` | Idiomas de nombres comunes, ISO 639-3 (por defecto `spa`) |
+| `--concurrency` | Especies procesadas a la vez (1 a 16, por defecto 4) |
+| `--skip-existing` | Omite las especies ya importadas para el país: sirve para reanudar |
+| `--dry-run` | Simula sin escribir en la base de datos |
+
+El importador es idempotente: se puede ejecutar varias veces sin duplicar datos. Una
+sola especie que falle no detiene la carga; al final lista las fallidas y se reintentan
+ejecutando de nuevo con `--skip-existing`.
+
+Hacia GBIF respeta un máximo de unas 10 peticiones por segundo en total, sin importar
+la concurrencia, y reintenta con espera ante errores 429 o 5xx. Importar todo un país
+toma varias horas.
+
+`--basis HUMAN_OBSERVATION` favorece plantas que la gente ve y fotografía (parques,
+casas, calles); `--basis ALL` incluye también especímenes de herbario y otros registros.
 
 ## De dónde sale cada dato
 
 | Dato | Endpoint de GBIF | Va a |
 |---|---|---|
-| Especies más registradas del país | `GET /occurrence/search?country=CO&taxonKey=6&basisOfRecord=HUMAN_OBSERVATION&license=CC0_1_0&license=CC_BY_4_0&facet=speciesKey` | lista de candidatas y `species_countries.occurrenceCount` |
-| Taxonomía | `GET /species/{key}` | `species` |
-| Nombres comunes | `GET /species/{key}/vernacularNames` | `common_names` |
-| Licencia de cada nombre | `GET /species/{sourceTaxonKey}` → `datasetKey` → `GET /dataset/{key}` | `sources` |
-| Altitud | `GET /occurrence/search?...&elevation=0,6500&license=...&limit=300` | `species_countries` |
+| Especies del país con registros abiertos | `GET /occurrence/search?country=CO&taxonKey=6&license=CC0_1_0&license=CC_BY_4_0&facet=speciesKey` | lista de candidatas y `especies_paises.num_registros` |
+| Taxonomía | `GET /species/{key}` | `familias`, `generos`, `especies` |
+| Nombres comunes | `GET /species/{key}/vernacularNames` | `nombres_comunes` |
+| Licencia de cada nombre | `GET /species/{sourceTaxonKey}` → `datasetKey` → `GET /dataset/{key}` | `fuentes` |
+| Altitud (si hay 20 o más registros) | `GET /occurrence/search?...&elevation=0,6500&limit=300` | `especies_paises` |
 
-`basisOfRecord=HUMAN_OBSERVATION` favorece plantas que la gente ve y fotografía
-(parques, casas, calles) frente a especímenes de herbario.
-
-## Mapa de tablas
-
-```
-sources ─┬─< species >─┬─< species_countries   (especie × país: registros y altitud)
-         │             ├─< common_names        (nombres, con idioma, país y fuente)
-         │             ├─< invasion_statuses   (nativa / introducida / invasora, por lugar)
-         │             └─< care_observations   (experiencias de cuidado, por la comunidad)
-         └─ cada fila de datos apunta a su fuente y licencia
-```
+## Mapeo de campos
 
 | GBIF | Tabla.columna |
 |---|---|
-| `canonicalName` | `species.canonicalName` (clave natural, única) |
-| `scientificName` | `species.scientificName` (con autoría) |
-| `genus`, `family` | `species.genus`, `species.family` |
-| `key` | `species.gbifKey` |
-| `vernacularName` | `common_names.name` |
-| `language` (spa) | `common_names.language` (es) |
-| `country` (si existe) | `common_names.countryIso` (si no, `null`) |
-| `datasetKey` + `license` | `sources.externalId`, `sources.license` |
-| conteo de la faceta | `species_countries.occurrenceCount` |
-| percentil 5 y 95 de `elevation` | `species_countries.minElevationM`, `maxElevationM` |
+| `family` | `familias.nombre` |
+| `genus` | `generos.nombre` (con `familia_id`) |
+| `canonicalName` sin el género | `especies.epiteto` |
+| `scientificName` sin el canónico | `especies.autoria` |
+| `key` | `especies.clave_gbif` |
+| `vernacularName` | `nombres_comunes.nombre` |
+| `language` (spa) | `nombres_comunes.idioma_codigo` (es) |
+| `country` (si existe) | `nombres_comunes.pais_codigo` (si no, `null`) |
+| `datasetKey` | `fuentes.id_externo` |
+| licencia del dataset | `fuentes.licencia_codigo` → `licencias` |
+| conteo de la faceta | `especies_paises.num_registros` |
+| percentil 5 y 95 de `elevation` | `especies_paises.altitud_min_m`, `altitud_max_m` |
 
-## Normalización
+Los países y los idiomas son tablas de referencia: se crean la primera vez que
+aparecen, con su nombre en español.
 
-**De los datos** (`src/importers/gbif/normalize.ts`):
+## Normalización de los datos
+
+Las funciones están en `src/importers/gbif/normalize.ts`:
 
 - Solo especies **aceptadas** de rango `SPECIES` y reino Plantae. Sinónimos y
   rangos inferiores se omiten.
-- Nombres: se guarda el original (`name`) y una versión sin acentos, en minúsculas y
-  sin espacios dobles (`nameNormalized`). La búsqueda usa la segunda: "almacigo"
-  encuentra "Almácigo".
+- El nombre científico se descompone en género, epíteto y autoría; el nombre completo
+  se arma al leerlo (`género + epíteto`), no se guarda repetido.
+- Nombres comunes: se guarda el original (`nombre`) y una versión sin acentos, en
+  minúsculas y sin espacios dobles (`nombre_normalizado`), que usa la búsqueda.
 - Campos con varios nombres ("A | B | C") se separan en filas, sin repetidos.
 - Idioma ISO 639-3 → 639-1 (`spa` → `es`). País solo si la fuente lo da; **nunca se supone**.
 - Licencia → `CC0-1.0` o `CC-BY-4.0`. Cualquier otra se rechaza.
@@ -65,19 +78,14 @@ sources ─┬─< species >─┬─< species_countries   (especie × país: re
   20 registros. Se guardan los percentiles 5 y 95, no el mínimo y el máximo, porque
   un solo error de captura arruinaría el rango.
 
-**De la base de datos:**
-
-- La altitud vive en `species_countries`, no en `species`, porque depende del país.
-- Las fuentes viven en `sources` y se referencian, no se repiten como texto.
-- `genus` y `family` están como texto en `species` a propósito: es una
-  desnormalización controlada (la taxonomía casi no cambia y simplifica las consultas).
-  Si hace falta, se pasa a tablas de taxones o al grafo más adelante.
+La normalización de la base de datos (tercera forma normal) está explicada en
+[DATABASE.md](DATABASE.md).
 
 ## Licencias
 
 - Solo se importan datos con licencia **CC0 o CC-BY**. Los registros de ocurrencias se
   filtran en la propia consulta, y cada nombre común se verifica contra la licencia de su
-  dataset. En una prueba real se excluyó, por ejemplo, un listado CC-BY-NC.
+  dataset. Por ejemplo, se excluye un listado CC-BY-NC de Barranquilla.
 - La taxonomía de GBIF (Backbone) es **CC-BY 4.0**: exige atribución. Por eso la atribución
   debe mostrarse en la API y en los productos derivados.
 - No se importan usos medicinales ni rituales (ver `CONTENT_POLICY.md`). Aunque
@@ -86,7 +94,7 @@ sources ─┬─< species >─┬─< species_countries   (especie × país: re
 ## Pendientes conocidos
 
 - Muchos nombres comunes de GBIF (Catalogue of Life) no indican país: quedan con
-  `countryIso = null` y pueden ser de otro país de la región.
+  `pais_codigo = null` y pueden ser de otro país de la región.
 - Para citar datos de forma rigurosa, GBIF recomienda descargas con DOI. Esto sirve
   para el MVP; antes de un lanzamiento público conviene citar con DOI.
 - Falta cruzar con listas oficiales de especies invasoras (ver `README`).

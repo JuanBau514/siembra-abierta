@@ -29,6 +29,9 @@ pnpm start:dev             # http://localhost:3000/graphql
 
 Comprobaciones: `pnpm lint`, `pnpm test`, `pnpm build`. Estado del servicio: `GET /health`.
 
+Documentación completa en [docs/](docs/README.md): [guía de la API](docs/API.md),
+[base de datos](docs/DATABASE.md) y [esquema](docs/database/SCHEMA.md).
+
 La API limita la profundidad (`GRAPHQL_MAX_DEPTH`) y el costo
 (`GRAPHQL_MAX_COMPLEXITY`) de las consultas GraphQL para protegerla.
 

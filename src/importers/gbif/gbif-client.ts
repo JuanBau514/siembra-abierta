@@ -30,18 +30,48 @@ export interface GbifDataset {
   citation?: { text?: string };
 }
 
+export interface GbifMatch {
+  matchType: string;
+  rank?: string;
+  status?: string;
+  speciesKey?: number;
+  usageKey?: number;
+  acceptedUsageKey?: number;
+}
+
+export interface GbifMedia {
+  type?: string;
+  identifier?: string;
+  references?: string;
+  license?: string;
+  creator?: string;
+  rightsHolder?: string;
+}
+
+export interface GbifImageOccurrence {
+  key: number;
+  countryCode?: string;
+  media?: GbifMedia[];
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class GbifClient {
-  private lastRequestAt = 0;
-  constructor(private readonly minIntervalMs = 120) {}
+  private nextSlotAt = 0;
+  constructor(private readonly minIntervalMs = 100) {}
+
+  /** Reserva un turno: garantiza un intervalo mínimo entre peticiones, aunque haya varias en paralelo. */
+  private async waitForSlot() {
+    const now = Date.now();
+    const start = Math.max(now, this.nextSlotAt);
+    this.nextSlotAt = start + this.minIntervalMs;
+    if (start > now) await sleep(start - now);
+  }
 
   /** GET con espera mínima entre peticiones y reintentos ante 429/5xx. */
   private async get<T>(path: string): Promise<T> {
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      const wait = this.lastRequestAt + this.minIntervalMs - Date.now();
-      if (wait > 0) await sleep(wait);
-      this.lastRequestAt = Date.now();
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      await this.waitForSlot();
       const response = await fetch(`${BASE_URL}${path}`, {
         headers: {
           Accept: 'application/json',
@@ -50,7 +80,7 @@ export class GbifClient {
       });
       if (response.ok) return (await response.json()) as T;
       if (response.status === 429 || response.status >= 500) {
-        await sleep(1000 * 2 ** attempt);
+        await sleep(1000 * 2 ** Math.min(attempt, 5));
         continue;
       }
       throw new Error(`GBIF ${response.status} en ${path}`);
@@ -59,12 +89,16 @@ export class GbifClient {
   }
 
   /** Especies de plantas más registradas en un país, solo con datos de licencia abierta. */
-  async topPlantSpecies(country: string, limit: number, basisOfRecord: string) {
+  async topPlantSpecies(
+    country: string,
+    limit: number,
+    basisOfRecord: string | null,
+  ) {
     const data = await this.get<{
       facets: { counts: { name: string; count: number }[] }[];
     }>(
       `/occurrence/search?country=${country}&taxonKey=${PLANTAE_KEY}` +
-        `&basisOfRecord=${basisOfRecord}&${OPEN_LICENSE_PARAMS}` +
+        `${basisOfRecord ? `&basisOfRecord=${basisOfRecord}` : ''}&${OPEN_LICENSE_PARAMS}` +
         `&limit=0&facet=speciesKey&facetLimit=${limit}`,
     );
     return (data.facets[0]?.counts ?? []).map((c) => ({
@@ -97,5 +131,37 @@ export class GbifClient {
     return data.results
       .map((r) => r.elevation)
       .filter((v): v is number => typeof v === 'number');
+  }
+
+  /** Busca un nombre científico de planta en el Backbone de GBIF. */
+  matchSpecies(name: string) {
+    return this.get<GbifMatch>(
+      `/species/match?kingdom=Plantae&name=${encodeURIComponent(name)}`,
+    );
+  }
+
+  /** Registros abiertos (CC0/CC-BY) de una especie en un país. */
+  async occurrenceCount(country: string, speciesKey: number) {
+    const data = await this.get<{ count: number }>(
+      `/occurrence/search?country=${country}&speciesKey=${speciesKey}&${OPEN_LICENSE_PARAMS}&limit=0`,
+    );
+    return data.count;
+  }
+
+  /**
+   * Observaciones con fotos de una especie (no de especímenes de herbario).
+   * La licencia de cada foto puede ser distinta a la del registro: quien llama debe revisarla.
+   */
+  async imageOccurrences(
+    speciesKey: number,
+    country: string | null,
+    limit: number,
+  ) {
+    const data = await this.get<{ results: GbifImageOccurrence[] }>(
+      `/occurrence/search?speciesKey=${speciesKey}&mediaType=StillImage` +
+        `&basisOfRecord=HUMAN_OBSERVATION&${OPEN_LICENSE_PARAMS}` +
+        `${country ? `&country=${country}` : ''}&limit=${limit}`,
+    );
+    return data.results;
   }
 }

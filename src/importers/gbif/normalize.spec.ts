@@ -2,6 +2,7 @@ import {
   cleanDisplayName,
   elevationRange,
   normalizeText,
+  splitScientificName,
   splitVernacularNames,
   toIso1Language,
   toOpenLicense,
@@ -73,5 +74,39 @@ describe('elevationRange', () => {
   });
   it('devuelve null si la muestra es pequeña', () => {
     expect(elevationRange([100, 200, 300])).toBeNull();
+  });
+});
+
+describe('splitScientificName', () => {
+  it('separa género, epíteto y autoría', () => {
+    expect(
+      splitScientificName(
+        'Dimerandra emarginata',
+        'Dimerandra emarginata (G.Mey.) Hoehne',
+        'Dimerandra',
+      ),
+    ).toEqual({
+      genus: 'Dimerandra',
+      epithet: 'emarginata',
+      authorship: '(G.Mey.) Hoehne',
+    });
+  });
+  it('funciona sin autoría ni género de referencia', () => {
+    expect(splitScientificName('Bursera simaruba', 'Bursera simaruba')).toEqual(
+      {
+        genus: 'Bursera',
+        epithet: 'simaruba',
+        authorship: null,
+      },
+    );
+  });
+  it('mantiene epítetos de varias palabras (híbridos)', () => {
+    expect(
+      splitScientificName('Salvia × jamensis', 'Salvia × jamensis J.Compton')
+        ?.epithet,
+    ).toBe('× jamensis');
+  });
+  it('rechaza nombres sin epíteto', () => {
+    expect(splitScientificName('Bursera', 'Bursera L.')).toBeNull();
   });
 });

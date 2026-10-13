@@ -10,6 +10,8 @@ const { values } = parseArgs({
     country: { type: 'string', default: 'CO' },
     limit: { type: 'string', default: '50' },
     basis: { type: 'string', default: 'HUMAN_OBSERVATION' },
+    concurrency: { type: 'string', default: '4' },
+    'skip-existing': { type: 'boolean', default: false },
     languages: { type: 'string', default: 'spa' },
     'dry-run': { type: 'boolean', default: false },
   },
@@ -18,18 +20,23 @@ const { values } = parseArgs({
 const options = {
   country: values.country!,
   limit: Number(values.limit),
-  basisOfRecord: values.basis!,
+  basisOfRecord: values.basis!.toUpperCase() === 'ALL' ? null : values.basis!,
+  concurrency: Number(values.concurrency),
+  skipExisting: values['skip-existing']!,
   languages: values.languages!.split(',').map((l) => l.trim().toLowerCase()),
   dryRun: values['dry-run']!,
 };
 if (
   !/^[A-Za-z]{2}$/.test(options.country) ||
+  !Number.isInteger(options.concurrency) ||
+  options.concurrency < 1 ||
+  options.concurrency > 16 ||
   !Number.isInteger(options.limit) ||
   options.limit < 1 ||
-  options.limit > 1000
+  options.limit > 200000
 ) {
   console.error(
-    'Uso: --country CO --limit 1..1000 [--basis HUMAN_OBSERVATION] [--languages spa] [--dry-run]',
+    'Uso: --country CO --limit 1..200000 [--basis HUMAN_OBSERVATION|ALL] [--languages spa] [--concurrency 4] [--skip-existing] [--dry-run]',
   );
   process.exit(1);
 }
@@ -44,8 +51,15 @@ try {
   console.log(
     `Importando ${options.limit} especies de ${options.country.toUpperCase()}${options.dryRun ? ' (simulación, no escribe)' : ''}…`,
   );
-  const stats = await new GbifImporter(prisma, new GbifClient()).run(options);
+  const importer = new GbifImporter(prisma, new GbifClient());
+  const stats = await importer.run(options);
   console.log('\nResumen:', stats);
+  if (importer.failedSpecies.length > 0) {
+    console.log(
+      'Especies fallidas (reintenta con --skip-existing):',
+      importer.failedSpecies.map((f) => f.key).join(', '),
+    );
+  }
 } finally {
   await prisma?.$disconnect();
 }

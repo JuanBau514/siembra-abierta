@@ -1,0 +1,259 @@
+"""Nombre común de una especie, con su idioma y país."""
+type CommonName {
+  """
+  País (ISO 3166-1 alfa-2) solo si la fuente lo indica; null si se desconoce.
+  """
+  countryIso: String
+
+  """Identificador del nombre."""
+  id: ID!
+
+  """Idioma, código ISO 639-1 (es, en...)."""
+  language: String!
+
+  """Nombre tal como se muestra al usuario."""
+  name: String!
+
+  """Región, si se conoce."""
+  region: String
+}
+
+"""
+Estatus de una especie en un lugar. Una especie puede ser invasora en un piso térmico y no en otro.
+"""
+type InvasionStatus {
+  """País, código ISO 3166-1 alfa-2."""
+  countryIso: String!
+
+  """Identificador del registro."""
+  id: ID!
+
+  """Daño que causa al ecosistema."""
+  impact: String
+
+  """Recomendación de manejo o control."""
+  management: String
+
+  """Altitud máxima donde aplica el estatus (m s. n. m.)."""
+  maxElevationM: Int
+
+  """Altitud mínima donde aplica el estatus (m s. n. m.)."""
+  minElevationM: Int
+
+  """Región, si aplica."""
+  region: String
+
+  """Nivel de riesgo en el idioma de la respuesta."""
+  riskLabel: String
+
+  """Riesgo ecológico, si se conoce."""
+  riskLevel: RiskLevel
+
+  """Especie afectada."""
+  species: Species
+
+  """Nativa, introducida o invasora."""
+  status: OriginStatus!
+
+  """Estatus en el idioma de la respuesta (Nativa, Introducida, Invasora)."""
+  statusLabel: String!
+
+  """Nivel de verificación del dato."""
+  verification: VerificationStatus!
+
+  """Nivel de verificación en el idioma de la respuesta."""
+  verificationLabel: String!
+}
+
+"""Estatus de una especie en un lugar."""
+enum OriginStatus {
+  """Introducida por el ser humano, sin daño documentado."""
+  INTRODUCED
+
+  """Introducida y con daño documentado a ecosistemas locales."""
+  INVASIVE
+
+  """Nativa de la región."""
+  NATIVE
+}
+
+"""Categoría de uso de una planta."""
+enum PlantCategory {
+  """Cultivos de campo: café, cacao, papa, maíz."""
+  CROP
+
+  """Flores de corte y ornamentales."""
+  FLOWER
+
+  """Frutas."""
+  FRUIT
+
+  """Hortalizas y verduras (incluye hierbas culinarias)."""
+  VEGETABLE
+}
+
+type Query {
+  """Especies invasoras registradas en un país (código ISO, p. ej. CO)."""
+  invasiveSpecies(
+    """País, código ISO 3166-1 alfa-2 (CO, EC, PA, VE)."""
+    countryIso: String!
+
+    """Máximo de resultados (1 a 50)."""
+    limit: Int! = 20
+  ): [InvasionStatus!]!
+
+  """Busca por nombre científico o nombre común."""
+  searchSpecies(
+    """Máximo de resultados (1 a 50)."""
+    limit: Int! = 20
+
+    """Texto a buscar. Ignora mayúsculas y acentos."""
+    query: String!
+  ): [Species!]!
+
+  """Una especie por su id."""
+  species(
+    """Identificador de la especie."""
+    id: ID!
+  ): Species
+
+  """
+  Especies de una categoría (frutas, hortalizas, cultivos, flores) en un país, en orden alfabético.
+  """
+  speciesByCategory(
+    """Categoría de uso."""
+    category: PlantCategory!
+
+    """País, código ISO 3166-1 alfa-2. Por defecto CO."""
+    countryIso: String! = "CO"
+
+    """Máximo de resultados (1 a 50)."""
+    limit: Int! = 20
+
+    """Cuántos resultados saltar, para paginar."""
+    offset: Int! = 0
+  ): [Species!]!
+}
+
+"""Nivel de riesgo ecológico de una especie invasora."""
+enum RiskLevel {
+  """Riesgo alto."""
+  HIGH
+
+  """Riesgo bajo."""
+  LOW
+
+  """Riesgo medio."""
+  MEDIUM
+}
+
+"""Especie de planta aceptada (sin sinónimos)."""
+type Species {
+  """Nombre científico sin autoría. Es único."""
+  canonicalName: String!
+
+  """Categorías de uso: fruta, hortaliza, cultivo, flor."""
+  categories: [PlantCategory!]!
+
+  """Categorías en el idioma de la respuesta (p. ej. "Frutas" o "Fruits")."""
+  categoryLabels: [String!]!
+
+  """
+  Nombres comunes conocidos. Con `language` solo devuelve los de ese idioma (es, en).
+  """
+  commonNames(
+    """Código ISO 639-1. Si se omite, devuelve todos."""
+    language: String
+  ): [CommonName!]!
+
+  """
+  Nombre listo para mostrar: el nombre común en el idioma de la respuesta (preferido el del país indicado) o, si no hay, el nombre científico.
+  """
+  displayName(
+    """País preferido, código ISO 3166-1 alfa-2."""
+    countryIso: String
+  ): String!
+
+  """Países donde se registra y su rango de altitud."""
+  distributions: [SpeciesCountry!]!
+
+  """Familia botánica."""
+  family: String
+
+  """Género."""
+  genus: String
+
+  """Identificador de la especie."""
+  id: ID!
+
+  """Fotografías con licencia abierta. La primera es la principal."""
+  images: [SpeciesImage!]!
+
+  """Estatus nativa/introducida/invasora por lugar."""
+  invasionStatuses: [InvasionStatus!]!
+
+  """Imagen principal, o null si la especie no tiene fotos abiertas."""
+  primaryImage: SpeciesImage
+
+  """Nombre científico con autoría."""
+  scientificName: String!
+}
+
+"""Presencia de una especie en un país y su rango de altitud."""
+type SpeciesCountry {
+  """País, código ISO 3166-1 alfa-2 (CO, EC, PA, VE)."""
+  countryIso: String!
+
+  """Registros con altitud usados para calcular el rango."""
+  elevationSampleSize: Int
+
+  """Percentil 95 de la altitud observada (m s. n. m.)."""
+  maxElevationM: Int
+
+  """Percentil 5 de la altitud observada (m s. n. m.)."""
+  minElevationM: Int
+
+  """Registros abiertos (CC0/CC-BY) de la especie en el país."""
+  occurrenceCount: Int!
+}
+
+"""
+Fotografía de una especie. Cada imagen trae su autoría y su licencia: al mostrarla hay que atribuir.
+"""
+type SpeciesImage {
+  """Autoría. Debe mostrarse junto a la imagen (CC-BY)."""
+  author: String!
+
+  """País donde se tomó, código ISO 3166-1 alfa-2."""
+  countryIso: String
+
+  """Identificador de la imagen."""
+  id: ID!
+
+  """Licencia: CC0-1.0 o CC-BY-4.0."""
+  license: String!
+
+  """Enlace al texto de la licencia."""
+  licenseUrl: String!
+
+  """Página de origen de la foto."""
+  pageUrl: String
+
+  """Enlace a una versión pequeña, para listas y tarjetas."""
+  thumbnailUrl: String
+
+  """Enlace a la imagen (tamaño grande)."""
+  url: String!
+}
+
+"""Nivel de verificación de un dato."""
+enum VerificationStatus {
+  """Varios reportes independientes coinciden."""
+  CORROBORATED
+
+  """Verificado por un experto o una institución."""
+  EXPERT_VERIFIED
+
+  """Reportado por una persona; sin corroborar."""
+  REPORTED
+}

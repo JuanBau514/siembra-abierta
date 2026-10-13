@@ -31,6 +31,9 @@ de derechos, así que tú conservas la autoría de lo que aportas.
 
 Este proyecto usa **solo pnpm**. Ver el README para instalar y arrancar.
 
+Si cambias el esquema de la base de datos o la API, ejecuta `pnpm docs:generate` y
+sube también los documentos generados. La CI lo verifica con `pnpm docs:check`.
+
 ## Flujo
 
 1. Abre un *issue* para discutir cambios grandes.
